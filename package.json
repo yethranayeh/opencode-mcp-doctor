@@ -1,0 +1,43 @@
+{
+	"name": "opencode-mcp-doctor",
+	"version": "0.1.0",
+	"description": "Report leftover and competing local MCP server processes behind your OpenCode servers",
+	"type": "module",
+	"license": "MIT",
+	"keywords": [
+		"opencode",
+		"mcp",
+		"plugin",
+		"processes"
+	],
+	"exports": {
+		".": "./index.ts",
+		"./detect": "./src/detect.ts",
+		"./cli": "./bin/mcp-doctor.ts"
+	},
+	"bin": {
+		"mcp-doctor": "./bin/mcp-doctor.ts"
+	},
+	"files": [
+		"index.ts",
+		"src",
+		"bin",
+		"README.md",
+		"LICENSE"
+	],
+	"scripts": {
+		"test": "bun test"
+	},
+	"devDependencies": {
+		"@opencode/plugin": "^2",
+		"bun-types": "latest"
+	},
+	"peerDependencies": {
+		"@opencode/plugin": ">=2"
+	},
+	"peerDependenciesMeta": {
+		"@opencode/plugin": {
+			"optional": true
+		}
+	}
+}
