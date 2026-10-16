@@ -4,92 +4,101 @@
  * plus every descendant that still carries the server package in its command line.
  * The process that launched that chain decides what it is for us:
  *
- *   - no parent left (reparented to launchd)  -> orphan, safe to reclaim
- *   - a live host (OpenCode, Claude, an IDE)  -> in use by that host
+ *   - no launcher left (see the table's orphan rule)   -> orphan, safe to reclaim
+ *   - a live host (OpenCode, Claude, an IDE)           -> in use by that host
  */
 
+import type { ProcessRow, ProcessTable } from "./process.ts";
+
 export interface ServerTarget {
-  /** Server name, as written in configuration. */
-  name: string
-  /** Launch command from configuration. */
-  command: string[]
+	/** Server name, as written in configuration. */
+	name: string;
+	/** Launch command from configuration. */
+	command: string[];
 }
 
-export interface PsEntry {
-  pid: number
-  ppid: number
-  command: string
-}
-
-export type OwnerKind = "self" | "opencode" | "app" | "orphan"
+export type OwnerKind = "self" | "opencode" | "app" | "orphan";
 
 export interface Instance {
-  server: string
-  /** Package name the chain was matched on. */
-  key: string
-  /** Topmost process of the chain; the one that was launched. */
-  rootPid: number
-  pids: number[]
-  owner: OwnerKind
-  ownerPid: number | null
-  ownerName: string
+	server: string;
+	/** Package name the chain was matched on. */
+	key: string;
+	/** Topmost process of the chain; the one that was launched. */
+	rootPid: number;
+	/** Chain pids, parents before children, so reversing them ends children first. */
+	pids: number[];
+	owner: OwnerKind;
+	ownerPid: number | null;
+	ownerName: string;
 }
 
 /** Hosts we name explicitly instead of showing as a bare executable. */
 const HOST_NAMES: Array<[RegExp, string]> = [
-  [/^opencode$/, "opencode"],
-  [/^claude$/, "claude"],
-  [/^codex$/, "codex"],
-]
+	[/^opencode(-cli)?$/, "opencode"],
+	[/^claude$/, "claude"],
+	[/^codex$/, "codex"],
+];
 
 /** Executables that take a package to run, so their first positional argument names the server. */
-const RUNNERS = new Set(["npx", "npm", "pnpm", "yarn", "bun", "bunx", "dlx", "deno", "uv", "uvx", "pipx"])
+const RUNNERS = new Set(["npx", "npm", "pnpm", "yarn", "bun", "bunx", "dlx", "deno", "uv", "uvx", "pipx"]);
 
 /**
  * The searchable name of an MCP server command: its package argument when it has
  * one, otherwise the executable. `npx -y chrome-devtools-mcp@latest` -> `chrome-devtools-mcp`.
  */
 export function packageKey(command: readonly string[]): string | null {
-  const executable = basename(command[0] ?? "")
-  if (!executable) {
-    return null
-  }
-  const positionals = command.slice(1).filter((arg) => !arg.startsWith("-"))
-  const runner = RUNNERS.has(executable)
-  for (let i = positionals.length - 1; i >= 0; i--) {
-    const arg = positionals[i]!
-    if (!/[A-Za-z]/.test(arg)) {
-      continue
-    }
-    if (runner || arg.includes("/") || arg.includes("-") || arg.includes(".") || arg.startsWith("@")) {
-      return stripVersion(arg)
-    }
-  }
-  return stripVersion(executable)
+	const executable = commandName(command[0] ?? "");
+	if (!executable) {
+		return null;
+	}
+	const positionals = command.slice(1).filter((arg) => !arg.startsWith("-"));
+	const runner = RUNNERS.has(commandStem(command[0] ?? ""));
+	for (let i = positionals.length - 1; i >= 0; i--) {
+		const arg = positionals[i]!;
+		if (!/[A-Za-z]/.test(arg)) {
+			continue;
+		}
+		if (runner || arg.includes("/") || arg.includes("-") || arg.includes(".") || arg.startsWith("@")) {
+			return stripVersion(arg);
+		}
+	}
+	return stripVersion(executable);
+}
+
+/**
+ * Executable name from a command line or a configured command argument. Handles a leading quoted
+ * path, as Windows command lines use, and both path separators.
+ */
+export function commandName(value: string): string {
+	const trimmed = value.trim();
+	let token = trimmed.split(" ")[0] ?? trimmed;
+	if (trimmed.startsWith('"')) {
+		const end = trimmed.indexOf('"', 1);
+		if (end > 1) {
+			token = trimmed.slice(1, end);
+		}
+	}
+	return token.split(/[\\/]/).pop() ?? token;
+}
+
+/** The same name folded for comparison: lowercase, without a Windows executable suffix. */
+export function commandStem(value: string): string {
+	return commandName(value)
+		.toLowerCase()
+		.replace(/\.(exe|cmd|bat|com)$/, "");
 }
 
 /** Drops a trailing `@version`, leaving scoped names such as `@scope/name` and paths intact. */
 function stripVersion(spec: string): string {
-  const at = spec.lastIndexOf("@")
-  if (at <= 0) {
-    return spec
-  }
-  const version = spec.slice(at + 1)
-  if (version.includes("/")) {
-    return spec
-  }
-  return spec.slice(0, at)
-}
-
-export function parsePs(output: string): PsEntry[] {
-  const entries: PsEntry[] = []
-  for (const line of output.split("\n")) {
-    const match = /^\s*(\d+)\s+(\d+)\s+(.*)$/.exec(line)
-    if (match) {
-      entries.push({ pid: Number(match[1]), ppid: Number(match[2]), command: match[3] })
-    }
-  }
-  return entries
+	const at = spec.lastIndexOf("@");
+	if (at <= 0) {
+		return spec;
+	}
+	const version = spec.slice(at + 1);
+	if (version.includes("/")) {
+		return spec;
+	}
+	return spec.slice(0, at);
 }
 
 /**
@@ -97,108 +106,115 @@ export function parsePs(output: string): PsEntry[] {
  * `selfPid` is the process the caller runs in, so it can recognise its own chains.
  */
 export function findInstances(
-  targets: readonly ServerTarget[],
-  entries: readonly PsEntry[],
-  selfPid: number,
+	targets: readonly ServerTarget[],
+	table: ProcessTable,
+	selfPid: number,
 ): Instance[] {
-  const byPid = new Map<number, PsEntry>()
-  const children = new Map<number, PsEntry[]>()
-  for (const entry of entries) {
-    byPid.set(entry.pid, entry)
-    const siblings = children.get(entry.ppid)
-    if (siblings) {
-      siblings.push(entry)
-    } else {
-      children.set(entry.ppid, [entry])
-    }
-  }
+	const rows = table.rows;
+	const byPid = new Map<number, ProcessRow>();
+	const children = new Map<number, ProcessRow[]>();
+	for (const row of rows) {
+		byPid.set(row.pid, row);
+		const siblings = children.get(row.ppid);
+		if (siblings) {
+			siblings.push(row);
+		} else {
+			children.set(row.ppid, [row]);
+		}
+	}
 
-  const instances: Instance[] = []
-  const seen = new Set<number>()
+	const matches = (row: ProcessRow, key: string) => {
+		if (table.foldCase) {
+			return row.command.toLowerCase().includes(key.toLowerCase());
+		}
+		return row.command.includes(key);
+	};
 
-  for (const target of targets) {
-    const key = packageKey(target.command)
-    if (!key) {
-      continue
-    }
+	const instances: Instance[] = [];
+	const seen = new Set<number>();
 
-    // Every matched process belongs to the chain of its topmost matching ancestor.
-    const tops = new Map<number, PsEntry>()
-    for (const entry of entries) {
-      if (!entry.command.includes(key)) {
-        continue
-      }
-      let top = entry
-      for (;;) {
-        const parent = byPid.get(top.ppid)
-        if (!parent || !parent.command.includes(key)) {
-          break
-        }
-        top = parent
-      }
-      tops.set(top.pid, top)
-    }
+	for (const target of targets) {
+		const key = packageKey(target.command);
+		if (!key) {
+			continue;
+		}
 
-    for (const top of tops.values()) {
-      if (seen.has(top.pid)) {
-        continue
-      }
-      seen.add(top.pid)
+		// Every matched process belongs to the chain of its topmost matching ancestor.
+		const tops = new Map<number, ProcessRow>();
+		for (const row of rows) {
+			if (!matches(row, key)) {
+				continue;
+			}
+			let top = row;
+			for (;;) {
+				const parent = byPid.get(top.ppid);
+				if (!parent || !matches(parent, key)) {
+					break;
+				}
+				top = parent;
+			}
+			tops.set(top.pid, top);
+		}
 
-      const pids = [top.pid]
-      const queue = [top.pid]
-      while (queue.length > 0) {
-        const pid = queue.pop()!
-        for (const child of children.get(pid) ?? []) {
-          if (child.command.includes(key)) {
-            pids.push(child.pid)
-            queue.push(child.pid)
-          }
-        }
-      }
+		for (const top of tops.values()) {
+			if (seen.has(top.pid)) {
+				continue;
+			}
+			seen.add(top.pid);
 
-      const host = byPid.get(top.ppid)
-      instances.push({
-        server: target.name,
-        key,
-        rootPid: top.pid,
-        pids: pids.sort((a, b) => a - b),
-        ...classify(host, selfPid),
-      })
-    }
-  }
+			const pids = [top.pid];
+			const queue = [top.pid];
+			while (queue.length > 0) {
+				const pid = queue.pop()!;
+				for (const child of children.get(pid) ?? []) {
+					if (matches(child, key)) {
+						pids.push(child.pid);
+						queue.push(child.pid);
+					}
+				}
+			}
 
-  return instances.sort((a, b) => a.server.localeCompare(b.server) || a.rootPid - b.rootPid)
+			const host = byPid.get(top.ppid);
+			instances.push({
+				server: target.name,
+				key,
+				rootPid: top.pid,
+				pids,
+				...classify(host, top, selfPid, table.isOrphanParent),
+			});
+		}
+	}
+
+	return instances.sort((a, b) => a.server.localeCompare(b.server) || a.rootPid - b.rootPid);
 }
 
-function classify(host: PsEntry | undefined, selfPid: number): Pick<Instance, "owner" | "ownerPid" | "ownerName"> {
-  // No parent, or the parent is launchd: the launcher is gone and the chain was reparented.
-  if (!host || host.pid === 1) {
-    return { owner: "orphan", ownerPid: null, ownerName: "no parent" }
-  }
-  if (host.pid === selfPid) {
-    return { owner: "self", ownerPid: host.pid, ownerName: "opencode" }
-  }
-  const name = basename(host.command)
-  for (const [pattern, label] of HOST_NAMES) {
-    if (pattern.test(name)) {
-      return { owner: label === "opencode" ? "opencode" : "app", ownerPid: host.pid, ownerName: label }
-    }
-  }
-  return { owner: "app", ownerPid: host.pid, ownerName: name }
-}
+function classify(
+	host: ProcessRow | undefined,
+	child: ProcessRow,
+	selfPid: number,
+	isOrphanParent: (parent: ProcessRow | undefined, child: ProcessRow) => boolean,
+): Pick<Instance, "owner" | "ownerPid" | "ownerName"> {
+	if (!host || isOrphanParent(host, child)) {
+		return { owner: "orphan", ownerPid: null, ownerName: "no parent" };
+	}
+	if (host.pid === selfPid) {
+		return { owner: "self", ownerPid: host.pid, ownerName: "opencode" };
+	}
 
-function basename(command: string): string {
-  const first = command.split(" ")[0] ?? command
-  const parts = first.split("/")
-  return parts[parts.length - 1] || first
+	const name = commandStem(host.name ?? host.command) || "unknown";
+	for (const [pattern, label] of HOST_NAMES) {
+		if (pattern.test(name)) {
+			return { owner: label === "opencode" ? "opencode" : "app", ownerPid: host.pid, ownerName: label };
+		}
+	}
+	return { owner: "app", ownerPid: host.pid, ownerName: name };
 }
 
 /** Instances that interfere with a new one: another live process already running the same server. */
 export function conflicts(instances: readonly Instance[]): Instance[] {
-  return instances.filter((instance) => instance.owner === "opencode" || instance.owner === "app")
+	return instances.filter((instance) => instance.owner === "opencode" || instance.owner === "app");
 }
 
 export function orphans(instances: readonly Instance[]): Instance[] {
-  return instances.filter((instance) => instance.owner === "orphan")
+	return instances.filter((instance) => instance.owner === "orphan");
 }

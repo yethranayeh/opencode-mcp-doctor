@@ -30,6 +30,8 @@ git clone https://github.com/yethranayeh/opencode-mcp-doctor \
   ~/.config/opencode/plugins/opencode-mcp-doctor
 ```
 
+The same path works on Windows, where it resolves to `%USERPROFILE%\.config\opencode\plugins\opencode-mcp-doctor`.
+
 Alternatively, point at the checkout from `opencode.json`:
 
 ```jsonc
@@ -62,7 +64,7 @@ mcp-doctor [options]
   -h, --help       Show this help.
 ```
 
-Exit codes: `0` nothing to reclaim, `1` orphaned processes found, `2` usage error.
+Exit codes: `0` nothing to reclaim, `1` orphaned processes found, `2` usage error, `3` the process table could not be read.
 
 Output names each chain and its owner:
 
@@ -72,16 +74,18 @@ chrome-devtools (chrome-devtools-mcp)
   in use    (claude pid 58337)  pids 58373,58567,58569
   in use    (opencode pid 89527)  pids 89958,89980,89981
   orphaned  (launcher gone)  pids 400,401
+    reclaim: kill 401 400
 
-3 live instances of chrome-devtools are running (claude, opencode). A new instance may fail
+2 live instances of chrome-devtools are running (claude, opencode). A new instance may fail
 to start while they hold the same resources. chrome-devtools-mcp shares one Chrome profile, so
 a second instance usually fails with "browser is already running".
 ```
 
 - **in use**: a live process owns the chain. The owner is the first ancestor outside the
   chain: an OpenCode service, an editor, the `claude` CLI, or anything else that launched it.
-- **orphaned**: the chain's launcher is gone and the process was reparented to `launchd`.
-  `kill` the root pid to reclaim it.
+- **orphaned**: the chain's launcher is gone. Reclaim it with the command on the `reclaim:` line:
+  `kill <pids>` on macOS and Linux, `taskkill /PID <root> /T /F` on Windows. Ending one process
+  does not end its descendants on either platform, which is why the command covers the whole chain.
 - A chain includes helper processes that carry the server's name in their command line, such
   as the Chrome instance `chrome-devtools-mcp` started.
 
@@ -112,7 +116,10 @@ cat /tmp/mcp-doctor.log
 
 ## Notes
 
-- Requires macOS or Linux as it reads process information from `ps`.
+- Runs on macOS, Linux and Windows. Process information comes from `ps` on macOS and Linux, and
+  from PowerShell's `Win32_Process` provider on Windows.
+- When the process table cannot be read, the CLI exits `3` and the plugin says so once per
+  session, rather than reporting a clean machine.
 - The CLI is TypeScript run through the runtime's type stripping, so it needs Bun or Node 22.6+.
 - The notice is a session message. Clients that render session messages show it. `opencode run` prints only assistant output, so the note does not appear there.
 - Configuration is read at load time. Add a server, then reload the plugin (`opencode service restart` or a config reload) for the check to cover it.

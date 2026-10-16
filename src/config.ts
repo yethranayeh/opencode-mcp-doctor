@@ -54,7 +54,8 @@ export function targetsFromConfig(config: unknown): ServerTarget[] {
     if (name === "servers" || !isRecord(value)) {
       continue;
     }
-    if (value.type !== "local" || value.disabled === true) {
+    // `disabled` is the current field; older configuration files use `enabled: false`.
+		if (value.type !== "local" || value.disabled === true || value.enabled === false) {
       continue;
     }
 
