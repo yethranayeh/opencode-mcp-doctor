@@ -26,11 +26,14 @@
 		"LICENSE"
 	],
 	"scripts": {
-		"test": "bun test"
+		"test": "bun test",
+		"typecheck": "tsc --noEmit"
 	},
 	"devDependencies": {
 		"@opencode/plugin": "^2",
-		"bun-types": "latest"
+		"@types/node": "^26.6.5",
+		"bun-types": "latest",
+		"typescript": "^7.0.2"
 	},
 	"peerDependencies": {
 		"@opencode/plugin": ">=2"

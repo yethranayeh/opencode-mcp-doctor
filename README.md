@@ -130,6 +130,8 @@ cat /tmp/mcp-doctor.log
 ## Development
 
 ```sh
+bun install
+bun run typecheck
 bun test
 ```
 

@@ -14,6 +14,8 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: oven-sh/setup-bun@v2
-      # No dependencies to install: the tests import nothing outside this repository,
-      # and the process tests exercise the real enumeration on each platform.
+      # Typechecking needs the dev dependencies (typescript, bun-types); the
+      # process tests still exercise the real enumeration on each platform.
+      - run: bun install --frozen-lockfile
+      - run: bun run typecheck
       - run: bun test
