@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import type { Instance } from "../src/detect.ts";
-import { conflictNote, formatReport, reclaimCommand, toJson } from "../src/report.ts";
+import { conflictNote, formatReport, notice, reclaimCommand, toJson } from "../src/report.ts";
 
 /** A chain listed parents-first, as detection returns it. */
 const orphan: Instance = {
@@ -16,6 +16,18 @@ const orphan: Instance = {
 const inUse: Instance = { ...orphan, owner: "app", ownerPid: 42, ownerName: "claude" };
 
 const own: Instance = { ...orphan, owner: "self", ownerPid: 7, ownerName: "opencode" };
+
+/** Another chain the same host launched, as a second copy of the server would appear. */
+function ownedBySelf(rootPid: number, pids: number[]): Instance {
+	return { ...own, rootPid, pids };
+}
+
+/** notice() text for a case that should report, so each test can assert on it directly. */
+function reported(instances: readonly Instance[], platform = "linux"): string {
+	const text = notice({ name: "chrome-devtools" }, instances, platform);
+	expect(text).not.toBeNull();
+	return text ?? "";
+}
 
 describe("reclaimCommand", () => {
 	test("lists POSIX pids children first", () => {
@@ -54,6 +66,38 @@ describe("conflictNote", () => {
 	test("says nothing for a single live chain or an orphan", () => {
 		expect(conflictNote([inUse])).toBeNull();
 		expect(conflictNote([orphan])).toBeNull();
+	});
+});
+
+describe("notice", () => {
+	test("says nothing when no chain is running", () => {
+		expect(notice({ name: "chrome-devtools" }, [])).toBeNull();
+	});
+
+	test("says nothing for a single chain this host owns", () => {
+		expect(notice({ name: "chrome-devtools" }, [own], "linux")).toBeNull();
+	});
+
+	// A host can spawn the same server more than once; ownership alone must not hide that.
+	test("reports several chains this same host launched", () => {
+		const text = reported([own, ownedBySelf(200, [200, 201]), ownedBySelf(300, [300])]);
+		expect(text).toContain("3 chrome-devtools instances are already running");
+		expect(text).toContain("This host (opencode) owns 3 of them.");
+		expect(text).toContain("in use:   pids 100,101,102 (owned by opencode pid 7)");
+		expect(text).toContain("3 live instances of chrome-devtools are running");
+	});
+
+	test("reports one chain owned by another host and names that host", () => {
+		const text = reported([inUse]);
+		expect(text).toContain("1 chrome-devtools instance is already running");
+		expect(text).toContain("owned by claude pid 42");
+		expect(text).not.toContain("This host");
+	});
+
+	test("reports an orphan with the reclaim command for a fixed platform", () => {
+		expect(reported([orphan], "linux")).toContain("orphaned: pids 100,101,102");
+		expect(reported([orphan], "linux")).toContain("reclaim with `kill 102 101 100`");
+		expect(reported([orphan], "win32")).toContain("reclaim with `taskkill /PID 100 /T /F`");
 	});
 });
 

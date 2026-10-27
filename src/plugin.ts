@@ -1,16 +1,17 @@
 /* OpenCode plugin entry point.
  *
  * On the first tool call that belongs to a local MCP server in a session, it looks for
- * other instances of that server: leftovers whose launcher exited, and live ones owned
- * by another host. It reports them once per session, and never kills anything.
+ * other instances of that server: leftovers whose launcher exited, and live chains that
+ * compete with the new one, including several chains launched by this same host. It
+ * reports them once per session, and never kills anything.
  */
 
 import { join } from "node:path";
 import { Plugin } from "@opencode/plugin";
 import { globalConfigPaths, readTargets } from "./config.ts";
-import { findInstances, type Instance, type ServerTarget } from "./detect.ts";
+import { findInstances } from "./detect.ts";
 import { snapshot } from "./process.ts";
-import { conflictNote, reclaimCommand } from "./report.ts";
+import { notice } from "./report.ts";
 import { trace } from "./system.ts";
 
 export default Plugin.define({
@@ -49,15 +50,13 @@ export default Plugin.define({
 					return;
 				}
 
-				const others = findInstances([target], result.table, self).filter(
-					(instance) => instance.owner !== "self",
-				);
-				trace({ step: "scan", tool: event.tool, others: others.map((instance) => instance.rootPid) });
-				if (others.length === 0) {
+				const instances = findInstances([target], result.table, self);
+				trace({ step: "scan", tool: event.tool, others: instances.map((instance) => instance.rootPid) });
+				const text = notice(target, instances);
+				if (!text) {
 					return;
 				}
 
-				const text = message(target, others);
 				await ctx.session.synthetic({ sessionID: event.sessionID, text });
 				trace({ step: "notified", text });
 			} catch (error) {
@@ -70,23 +69,4 @@ export default Plugin.define({
 /** Server names become tool name prefixes with the same normalization OpenCode applies. */
 function normalize(name: string): string {
 	return name.replace(/[^A-Za-z0-9_-]/g, "_");
-}
-
-function message(target: ServerTarget, others: readonly Instance[]): string {
-	const parts = [
-		`mcp-doctor: ${others.length} other ${target.name} instance(s) are running before you use it in this session.`,
-	];
-	for (const instance of others) {
-		const pids = instance.pids.join(",");
-		parts.push(
-			instance.owner === "orphan"
-				? `  orphaned: pids ${pids} (their launcher exited; reclaim with \`${reclaimCommand(instance)}\`)`
-				: `  in use:   pids ${pids} (owned by ${instance.ownerName} pid ${instance.ownerPid})`,
-		);
-	}
-	const note = conflictNote(others);
-	if (note) {
-		parts.push(`  ${note}`);
-	}
-	return parts.join("\n");
 }

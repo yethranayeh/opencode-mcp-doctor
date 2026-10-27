@@ -17,7 +17,7 @@ Two pieces:
 | Piece        | What it does                                                                                                                 |
 | ------------ | ---------------------------------------------------------------------------------------------------------------------------- |
 | `mcp-doctor` | CLI. Lists the running processes behind your servers and says who owns each one.                                             |
-| Plugin       | Checks once per session, on the first call to a local server's tool, and adds a note to the session when it finds something. |
+| Plugin       | Checks once per session, on the first call to a local server's tool, and adds a note when it finds leftover or competing chains, including several from this host. |
 
 Neither piece kills a process or writes to your configuration. It only reports and leaves the decision to you.
 
@@ -111,7 +111,7 @@ cat /tmp/mcp-doctor.log
 ```json
 {"step":"setup","self":2093,"directory":"/path/to/project","targets":["chrome-devtools"]}
 {"step":"scan","tool":"chrome-devtools_list_pages","others":[58373,89958]}
-{"step":"notified","text":"mcp-doctor: 2 other chrome-devtools instance(s) are running ..."}
+{"step":"notified","text":"mcp-doctor: 2 chrome-devtools instances are already running ..."}
 ```
 
 ## Notes

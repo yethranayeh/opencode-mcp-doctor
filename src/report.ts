@@ -1,6 +1,6 @@
 /* Formats scan results for the CLI and for the plugin message. */
 
-import { conflicts, type Instance } from "./detect.ts";
+import { conflicts, orphans, type Instance } from "./detect.ts";
 
 export function toJson(instances: readonly Instance[]): string {
 	return JSON.stringify(
@@ -61,6 +61,56 @@ function label(instance: Instance): string {
 
 function listedPids(instance: Instance): number[] {
 	return [...instance.pids].sort((a, b) => a - b);
+}
+
+/**
+ * Session note for a server the caller is about to use: leftover chains it can reclaim, and live
+ * chains that compete with the new one.
+ *
+ * Competition is counted with `conflicts()`, which includes chains this host launched. A single
+ * host can spawn several copies of one server, and those copies contend exactly like chains from
+ * different hosts, so they are reported too. A lone chain owned by the caller's own host is the
+ * expected case and stays silent. Null means there is nothing worth saying.
+ */
+export function notice(
+	target: { name: string },
+	instances: readonly Instance[],
+	platform: string = process.platform,
+): string | null {
+	if (instances.length === 0) {
+		return null;
+	}
+
+	const live = conflicts(instances);
+	const orphaned = orphans(instances);
+	if (orphaned.length === 0 && live.length === 1 && live[0]!.owner === "self") {
+		return null;
+	}
+
+	const own = live.filter((instance) => instance.owner === "self");
+	const count = instances.length;
+	const parts = [
+		`mcp-doctor: ${count} ${target.name} instance${count === 1 ? "" : "s"} ${count === 1 ? "is" : "are"} already running before you use it in this session.`,
+	];
+	if (own.length > 0) {
+		const host = own[0]!.ownerName;
+		parts[0] += ` This host (${host}) owns ${own.length} of them.`;
+	}
+
+	for (const instance of instances) {
+		const pids = instance.pids.join(",");
+		parts.push(
+			instance.owner === "orphan"
+				? `  orphaned: pids ${pids} (their launcher exited; reclaim with \`${reclaimCommand(instance, platform)}\`)`
+				: `  in use:   pids ${pids} (owned by ${instance.ownerName} pid ${instance.ownerPid})`,
+		);
+	}
+
+	const note = conflictNote(instances);
+	if (note) {
+		parts.push(`  ${note}`);
+	}
+	return parts.join("\n");
 }
 
 /**
