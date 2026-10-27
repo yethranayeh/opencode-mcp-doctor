@@ -29,7 +29,10 @@ export function reclaimCommand(instance: Instance, platform: string = process.pl
 }
 
 /** One line per chain, grouped by server. Empty when nothing is running. */
-export function formatReport(instances: readonly Instance[]): string {
+export function formatReport(
+	instances: readonly Instance[],
+	platform: string = process.platform,
+): string {
 	if (instances.length === 0) {
 		return "No local MCP server processes found.";
 	}
@@ -43,7 +46,7 @@ export function formatReport(instances: readonly Instance[]): string {
 		}
 		lines.push(`  ${label(instance)}  pids ${listedPids(instance).join(",")}`);
 		if (instance.owner === "orphan") {
-			lines.push(`    reclaim: ${reclaimCommand(instance)}`);
+			lines.push(`    reclaim: ${reclaimCommand(instance, platform)}`);
 		}
 	}
 	return lines.join("\n");

@@ -35,8 +35,10 @@ describe("formatReport", () => {
 	});
 
 	test("offers a reclaim command for an orphaned chain only", () => {
-		expect(formatReport([orphan])).toContain("kill 102 101 100");
-		expect(formatReport([inUse])).not.toContain("kill 102 101 100");
+		expect(formatReport([orphan], "linux")).toContain("kill 102 101 100");
+		expect(formatReport([orphan], "win32")).toContain("taskkill /PID 100 /T /F");
+		expect(formatReport([inUse], "linux")).not.toContain("kill 102 101 100");
+		expect(formatReport([inUse], "win32")).not.toContain("taskkill /PID 100 /T /F");
 	});
 });
 
