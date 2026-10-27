@@ -210,9 +210,12 @@ function classify(
 	return { owner: "app", ownerPid: host.pid, ownerName: name };
 }
 
-/** Instances that interfere with a new one: another live process already running the same server. */
+/**
+ * Instances that compete for a server's resources: every live chain, including one owned by the
+ * caller's own host. Orphans are left out, because they are reported for reclaiming instead.
+ */
 export function conflicts(instances: readonly Instance[]): Instance[] {
-	return instances.filter((instance) => instance.owner === "opencode" || instance.owner === "app");
+	return instances.filter((instance) => instance.owner !== "orphan");
 }
 
 export function orphans(instances: readonly Instance[]): Instance[] {

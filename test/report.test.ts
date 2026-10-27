@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import type { Instance } from "../src/detect.ts";
-import { formatReport, reclaimCommand, toJson } from "../src/report.ts";
+import { conflictNote, formatReport, reclaimCommand, toJson } from "../src/report.ts";
 
 /** A chain listed parents-first, as detection returns it. */
 const orphan: Instance = {
@@ -14,6 +14,8 @@ const orphan: Instance = {
 };
 
 const inUse: Instance = { ...orphan, owner: "app", ownerPid: 42, ownerName: "claude" };
+
+const own: Instance = { ...orphan, owner: "self", ownerPid: 7, ownerName: "opencode" };
 
 describe("reclaimCommand", () => {
 	test("lists POSIX pids children first", () => {
@@ -39,6 +41,19 @@ describe("formatReport", () => {
 		expect(formatReport([orphan], "win32")).toContain("taskkill /PID 100 /T /F");
 		expect(formatReport([inUse], "linux")).not.toContain("kill 102 101 100");
 		expect(formatReport([inUse], "win32")).not.toContain("taskkill /PID 100 /T /F");
+	});
+});
+
+describe("conflictNote", () => {
+	// A chain the caller's own host owns still competes with another live chain.
+	test("counts a self-owned chain alongside another live chain", () => {
+		const note = conflictNote([own, inUse]);
+		expect(note).toContain("2 live instances of chrome-devtools are running (opencode, claude)");
+	});
+
+	test("says nothing for a single live chain or an orphan", () => {
+		expect(conflictNote([inUse])).toBeNull();
+		expect(conflictNote([orphan])).toBeNull();
 	});
 });
 

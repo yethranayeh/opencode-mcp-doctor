@@ -1,6 +1,6 @@
 /* Formats scan results for the CLI and for the plugin message. */
 
-import type { Instance } from "./detect.ts";
+import { conflicts, type Instance } from "./detect.ts";
 
 export function toJson(instances: readonly Instance[]): string {
 	return JSON.stringify(
@@ -63,9 +63,12 @@ function listedPids(instance: Instance): number[] {
 	return [...instance.pids].sort((a, b) => a - b);
 }
 
-/** Short note for a server with more than one live process, naming the remedy for the common case. */
+/**
+ * Short note for a server with more than one live chain, naming the remedy for the common case.
+ * Chains are counted with `conflicts()`, so the note and detection agree on what competes.
+ */
 export function conflictNote(instances: readonly Instance[]): string | null {
-	const live = instances.filter((instance) => instance.owner !== "orphan");
+	const live = conflicts(instances);
 	if (live.length < 2) {
 		return null;
 	}

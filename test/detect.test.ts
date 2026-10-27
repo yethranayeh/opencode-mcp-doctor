@@ -72,8 +72,9 @@ describe("findInstances on macOS and Linux", () => {
 		expect(orphans(findInstances([CHROME], table, 999)).map((instance) => instance.rootPid)).toEqual([400]);
 	});
 
-	test("reports live chains of another host as conflicts", () => {
-		expect(conflicts(findInstances([CHROME], table, 10)).map((instance) => instance.rootPid)).toEqual([300]);
+	test("reports every live chain as a conflict, including the caller's own", () => {
+		const instances = findInstances([CHROME], table, 10);
+		expect(conflicts(instances).map((instance) => instance.rootPid)).toEqual([200, 300]);
 	});
 
 	test("separates servers by their own package key", () => {
