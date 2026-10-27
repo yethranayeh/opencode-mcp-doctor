@@ -5,7 +5,7 @@
  * read the table is reported as such: an unreadable table is not a clean machine.
  */
 
-import { execFileSync } from "node:child_process";
+import { execFile, execFileSync } from "node:child_process";
 
 export interface ProcessRow {
 	pid: number;
@@ -31,6 +31,15 @@ export type Snapshot = { ok: true; table: ProcessTable } | { ok: false; reason: 
 /** A real process table is far smaller than this; the limit only exists to fail loudly, not truncate. */
 const MAX_OUTPUT_BYTES = 32 * 1024 * 1024;
 
+/** The same call options for both read paths, so the sync and async reads cannot drift. */
+const READ_OPTIONS = {
+	encoding: "utf8" as const,
+	maxBuffer: MAX_OUTPUT_BYTES,
+	// Keep the command's own errors out of the terminal; they are reported as the reason.
+	stdio: ["ignore", "pipe", "pipe"] as ["ignore", "pipe", "pipe"],
+	windowsHide: true,
+};
+
 /**
  * Windows has no `ps` with these semantics. PowerShell's CIM provider gives the parent pid and
  * the command line in one call. CreationDate is converted here, because CIM's date format has no
@@ -51,41 +60,84 @@ Get-CimInstance Win32_Process | Select-Object ProcessId, ParentProcessId, Name, 
 `;
 
 /**
- * Reads the process table of the machine this runs on, or says why it could not.
+ * Everything that differs between platforms: the command that enumerates the table, the parser
+ * for its output, and the platform's orphan rule.
+ */
+interface Enumeration {
+	command: string;
+	args: readonly string[];
+	parse: (output: string) => ProcessRow[];
+	toTable: (rows: ProcessRow[]) => ProcessTable;
+}
+
+/**
+ * The one place that decides how this machine is enumerated.
  * Dispatches on the platform rather than probing for a `ps` binary: Git for Windows ships an
  * MSYS `ps` that appears to work but reports a private PID namespace, which would turn a missing
  * report into a confident wrong one.
  */
-export function snapshot(): Snapshot {
+function enumeration(): Enumeration {
 	if (process.platform === "win32") {
-		const result = readProcesses("powershell.exe", [
-			"-NoProfile",
-			"-NonInteractive",
-			"-Command",
-			WINDOWS_ENUMERATION_SCRIPT,
-		]);
-		return result.ok ? fromOutput(parseCim, win32Table, result.output) : result;
+		return {
+			command: "powershell.exe",
+			args: ["-NoProfile", "-NonInteractive", "-Command", WINDOWS_ENUMERATION_SCRIPT],
+			parse: parseCim,
+			toTable: win32Table,
+		};
 	}
 
-	const result = readProcesses("ps", ["-Ao", "pid=,ppid=,command="]);
-	return result.ok ? fromOutput(parsePs, posixTable, result.output) : result;
+	return {
+		command: "ps",
+		args: ["-Ao", "pid=,ppid=,command="],
+		parse: parsePs,
+		toTable: posixTable,
+	};
+}
+
+/**
+ * Reads the process table of the machine this runs on, or says why it could not, blocking until
+ * the command exits. For short-lived callers (the CLI) the wait costs nothing. A caller inside a
+ * long-lived host, such as the OpenCode plugin, uses snapshotAsync instead: on Windows this read
+ * takes seconds, and blocking the host's event loop that long would stall everything it serves.
+ */
+export function snapshot(): Snapshot {
+	const plan = enumeration();
+	return toSnapshot(plan, readProcesses(plan.command, plan.args));
+}
+
+/** The same table as snapshot(), read without blocking the event loop. */
+export async function snapshotAsync(): Promise<Snapshot> {
+	const plan = enumeration();
+	return toSnapshot(plan, await readProcessesAsync(plan.command, plan.args));
+}
+
+/** One place turns a completed read into a Snapshot, whichever way the read ran. */
+function toSnapshot(plan: Enumeration, result: Read): Snapshot {
+	return result.ok ? fromOutput(plan.parse, plan.toTable, result.output) : result;
 }
 
 type Read = { ok: true; output: string } | { ok: false; reason: string };
 
 function readProcesses(command: string, args: readonly string[]): Read {
 	try {
-		const output = execFileSync(command, args, {
-			encoding: "utf8",
-			maxBuffer: MAX_OUTPUT_BYTES,
-			// Keep the command's own errors out of the terminal; they are reported as the reason.
-			stdio: ["ignore", "pipe", "pipe"],
-			windowsHide: true,
-		});
-		return { ok: true, output };
+		return { ok: true, output: execFileSync(command, args, READ_OPTIONS) };
 	} catch (error) {
 		return { ok: false, reason: failureReason(error) };
 	}
+}
+
+function readProcessesAsync(command: string, args: readonly string[]): Promise<Read> {
+	return new Promise((resolve) => {
+		execFile(command, args, READ_OPTIONS, (error, stdout, stderr) => {
+			if (!error) {
+				resolve({ ok: true, output: stdout });
+				return;
+			}
+			// execFile's error carries the status but not the command's stderr, which the sync path
+			// does provide. Attach it so failureReason() reads both paths the same way.
+			resolve({ ok: false, reason: failureReason(Object.assign(error, { stderr })) });
+		});
+	});
 }
 
 function fromOutput(

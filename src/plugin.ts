@@ -10,7 +10,7 @@ import { join } from "node:path";
 import { Plugin } from "@opencode/plugin";
 import { globalConfigPaths, readTargets } from "./config.ts";
 import { findInstances } from "./detect.ts";
-import { snapshot } from "./process.ts";
+import { snapshotAsync } from "./process.ts";
 import { notice } from "./report.ts";
 import { trace } from "./system.ts";
 
@@ -40,7 +40,7 @@ export default Plugin.define({
 			}
 			checked.add(event.sessionID);
 			try {
-				const result = snapshot();
+				const result = await snapshotAsync();
 				if (!result.ok) {
 					trace({ step: "snapshot-failed", reason: result.reason });
 					await ctx.session.synthetic({

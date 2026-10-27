@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { parseCim, parsePs, posixTable, snapshot, win32Table } from "../src/process.ts";
+import { parseCim, parsePs, posixTable, snapshot, snapshotAsync, win32Table } from "../src/process.ts";
 import type { ProcessRow } from "../src/process.ts";
 
 describe("parsePs", () => {
@@ -108,6 +108,15 @@ describe("orphan rules", () => {
 describe("snapshot", () => {
 	test("reads this machine's process table", () => {
 		const result = snapshot();
+		expect(result.ok).toBe(true);
+		if (result.ok) {
+			expect(result.table.rows.length).toBeGreaterThan(10);
+			expect(result.table.rows.some((row) => row.pid === process.pid)).toBe(true);
+		}
+	});
+
+	test("reads this machine's process table asynchronously", async () => {
+		const result = await snapshotAsync();
 		expect(result.ok).toBe(true);
 		if (result.ok) {
 			expect(result.table.rows.length).toBeGreaterThan(10);
