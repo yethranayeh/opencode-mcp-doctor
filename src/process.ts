@@ -31,6 +31,12 @@ export type Snapshot = { ok: true; table: ProcessTable } | { ok: false; reason: 
 /** A real process table is far smaller than this; the limit only exists to fail loudly, not truncate. */
 const MAX_OUTPUT_BYTES = 32 * 1024 * 1024;
 
+/**
+ * Far above the slowest observed read (the PowerShell CIM query takes a few seconds on Windows),
+ * and low enough that a wedged enumeration reports itself instead of hanging the caller forever.
+ */
+const ENUMERATION_TIMEOUT_MS = 20_000;
+
 /** The same call options for both read paths, so the sync and async reads cannot drift. */
 const READ_OPTIONS = {
 	encoding: "utf8" as const,
@@ -38,6 +44,8 @@ const READ_OPTIONS = {
 	// Keep the command's own errors out of the terminal; they are reported as the reason.
 	stdio: ["ignore", "pipe", "pipe"] as ["ignore", "pipe", "pipe"],
 	windowsHide: true,
+	// The plugin awaits this read inside the host, so a hung command must eventually give up.
+	timeout: ENUMERATION_TIMEOUT_MS,
 };
 
 /**
