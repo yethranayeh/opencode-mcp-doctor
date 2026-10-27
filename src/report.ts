@@ -64,6 +64,21 @@ function listedPids(instance: Instance): number[] {
 }
 
 /**
+ * Exit code for a scan. Precedence: an orphan is actionable, so it wins over competition; otherwise
+ * `strict` turns competing live chains into a failure. A table that could not be read is decided
+ * before this runs, so 3 never appears here.
+ */
+export function exitStatus(instances: readonly Instance[], strict: boolean): number {
+	if (orphans(instances).length > 0) {
+		return 1;
+	}
+	if (strict && competingChains(instances) !== null) {
+		return 4;
+	}
+	return 0;
+}
+
+/**
  * Session note for a server the caller is about to use: leftover chains it can reclaim, and live
  * chains that compete with the new one.
  *
@@ -114,19 +129,44 @@ export function notice(
 }
 
 /**
+ * The live chains of one server that compete with each other, or null when no server has two.
+ * Competition is per server: two different servers each running one chain do not contend, even
+ * though both are live. The busiest server wins, so the note names the case worth acting on.
+ */
+function competingChains(instances: readonly Instance[]): Instance[] | null {
+	const groups = new Map<string, Instance[]>();
+	for (const instance of conflicts(instances)) {
+		const group = groups.get(instance.key);
+		if (group) {
+			group.push(instance);
+		} else {
+			groups.set(instance.key, [instance]);
+		}
+	}
+
+	let worst: Instance[] | null = null;
+	for (const group of groups.values()) {
+		if (group.length > 1 && (!worst || group.length > worst.length)) {
+			worst = group;
+		}
+	}
+	return worst;
+}
+
+/**
  * Short note for a server with more than one live chain, naming the remedy for the common case.
  * Chains are counted with `conflicts()`, so the note and detection agree on what competes.
  */
 export function conflictNote(instances: readonly Instance[]): string | null {
-	const live = conflicts(instances);
-	if (live.length < 2) {
+	const live = competingChains(instances);
+	if (!live) {
 		return null;
 	}
 	const names = [...new Set(live.map((instance) => instance.ownerName))].join(", ");
 	const note =
-		`${live.length} live instances of ${instances[0]?.server} are running (${names}). ` +
+		`${live.length} live instances of ${live[0]?.server} are running (${names}). ` +
 		`A new instance may fail to start while they hold the same resources.`;
-	if (instances[0]?.key.includes("chrome-devtools")) {
+	if (live[0]?.key.includes("chrome-devtools")) {
 		return `${note} chrome-devtools-mcp shares one Chrome profile, so a second instance usually fails with "browser is already running".`;
 	}
 	return note;

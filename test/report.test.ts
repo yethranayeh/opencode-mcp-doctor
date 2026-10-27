@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import type { Instance } from "../src/detect.ts";
-import { conflictNote, formatReport, notice, reclaimCommand, toJson } from "../src/report.ts";
+import { conflictNote, exitStatus, formatReport, notice, reclaimCommand, toJson } from "../src/report.ts";
 
 /** A chain listed parents-first, as detection returns it. */
 const orphan: Instance = {
@@ -16,6 +16,16 @@ const orphan: Instance = {
 const inUse: Instance = { ...orphan, owner: "app", ownerPid: 42, ownerName: "claude" };
 
 const own: Instance = { ...orphan, owner: "self", ownerPid: 7, ownerName: "opencode" };
+
+/** A live chain of a different server, to keep competition from being counted across servers. */
+const otherServer: Instance = {
+	...inUse,
+	server: "postgres",
+	key: "postgres-mcp",
+	rootPid: 500,
+	pids: [500],
+	ownerName: "codex",
+};
 
 /** Another chain the same host launched, as a second copy of the server would appear. */
 function ownedBySelf(rootPid: number, pids: number[]): Instance {
@@ -66,6 +76,44 @@ describe("conflictNote", () => {
 	test("says nothing for a single live chain or an orphan", () => {
 		expect(conflictNote([inUse])).toBeNull();
 		expect(conflictNote([orphan])).toBeNull();
+	});
+
+	// Two servers running one chain each are both live, but they do not contend with each other.
+	test("says nothing when different servers each run one chain", () => {
+		expect(conflictNote([inUse, otherServer])).toBeNull();
+	});
+});
+
+describe("exitStatus", () => {
+	test("succeeds when nothing is running", () => {
+		expect(exitStatus([], false)).toBe(0);
+		expect(exitStatus([], true)).toBe(0);
+	});
+
+	test("succeeds for a single live chain", () => {
+		expect(exitStatus([inUse], false)).toBe(0);
+		expect(exitStatus([inUse], true)).toBe(0);
+	});
+
+	// Competition is opt-in: the same three chains pass by default and fail under --strict.
+	test("fails on three competing chains only with strict", () => {
+		const chains = [own, ownedBySelf(200, [200, 201]), ownedBySelf(300, [300])];
+		expect(exitStatus(chains, false)).toBe(0);
+		expect(exitStatus(chains, true)).toBe(4);
+	});
+
+	test("reports an orphan even with strict", () => {
+		expect(exitStatus([orphan], true)).toBe(1);
+	});
+
+	// Competition is per server: one chain each of two servers is not a conflict.
+	test("does not fail two different servers that each run once", () => {
+		expect(exitStatus([inUse, otherServer], true)).toBe(0);
+	});
+
+	// An orphan is actionable, so it wins over competition.
+	test("prefers an orphan over competing chains with strict", () => {
+		expect(exitStatus([orphan, own, ownedBySelf(200, [200])], true)).toBe(1);
 	});
 });
 

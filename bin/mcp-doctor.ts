@@ -2,13 +2,13 @@
 /* CLI: report local MCP server processes that are leftover or competing.
  *
  * Exit codes: 0 nothing to reclaim, 1 orphaned processes found, 2 usage error,
- * 3 the process table could not be read.
+ * 3 the process table could not be read, 4 competing live chains with --strict.
  */
 
 import { readTargets } from "../src/config.ts";
-import { findInstances, orphans } from "../src/detect.ts";
+import { findInstances } from "../src/detect.ts";
 import { snapshot } from "../src/process.ts";
-import { conflictNote, formatReport, toJson } from "../src/report.ts";
+import { conflictNote, exitStatus, formatReport, toJson } from "../src/report.ts";
 import { selfPid } from "../src/system.ts";
 
 const USAGE = `Usage: mcp-doctor [options]
@@ -20,18 +20,21 @@ Options:
   --config <path>  Read server commands from this config file (repeatable).
   --json           Print machine-readable output.
   --quiet          Print nothing; use the exit code only.
+  --strict         Fail when more than one live chain competes for a server.
   -h, --help       Show this help.
 
 Exit codes:
   0  nothing to reclaim
   1  orphaned processes found
   2  usage error
-  3  the process table could not be read`;
+  3  the process table could not be read
+  4  competing live chains found (--strict)`;
 
 function main(argv: readonly string[]): number {
   const configs: string[] = [];
   let json = false;
   let quiet = false;
+  let strict = false;
 
   for (let i = 0; i < argv.length; i++) {
     const arg = argv[i]!;
@@ -39,6 +42,8 @@ function main(argv: readonly string[]): number {
       json = true;
     } else if (arg === "--quiet") {
       quiet = true;
+    } else if (arg === "--strict") {
+      strict = true;
     } else if (arg === "--config") {
       const path = argv[++i];
       if (!path) {
@@ -64,7 +69,6 @@ function main(argv: readonly string[]): number {
   }
 
   const instances = findInstances(targets, result.table, selfPid());
-  const leftover = orphans(instances);
 
   if (!quiet) {
     process.stdout.write(json ? `${toJson(instances)}\n` : `${formatReport(instances)}\n`);
@@ -74,7 +78,7 @@ function main(argv: readonly string[]): number {
     }
   }
 
-  return leftover.length > 0 ? 1 : 0;
+  return exitStatus(instances, strict);
 }
 
 process.exit(main(process.argv.slice(2)));

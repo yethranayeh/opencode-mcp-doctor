@@ -61,10 +61,13 @@ mcp-doctor [options]
   --config <path>  Read server commands from this config file (repeatable).
   --json           Print machine-readable output.
   --quiet          Print nothing; use the exit code only.
+  --strict         Fail when more than one live chain competes for a server.
   -h, --help       Show this help.
 ```
 
-Exit codes: `0` nothing to reclaim, `1` orphaned processes found, `2` usage error, `3` the process table could not be read.
+Exit codes: `0` nothing to reclaim, `1` orphaned processes found, `2` usage error, `3` the process table could not be read, `4` competing live chains found with `--strict`.
+
+Competition is reported either way; `--strict` makes it change the exit code, so `--quiet --strict` is enough for a CI check. An orphan still exits `1` under `--strict`.
 
 Output names each chain and its owner:
 
