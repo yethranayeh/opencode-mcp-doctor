@@ -167,7 +167,7 @@ export function conflictNote(instances: readonly Instance[]): string | null {
 		`${live.length} live instances of ${live[0]?.server} are running (${names}). ` +
 		`A new instance may fail to start while they hold the same resources.`;
 	if (live[0]?.key.includes("chrome-devtools")) {
-		return `${note} chrome-devtools-mcp shares one Chrome profile, so a second instance usually fails with "browser is already running".`;
+		return `${note} chrome-devtools-mcp shares one Chrome profile by default, so a second instance usually fails with "browser is already running".`;
 	}
 	return note;
 }

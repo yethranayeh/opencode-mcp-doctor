@@ -10,7 +10,7 @@ Two things go wrong with those processes:
 - **Competition.** A second instance starts while an earlier one is still running, and the
   two fight over shared resources.
 
-It was written mainly for `chrome-devtools-mcp`, where every instance shares one Chrome profile, so a second one fails with `browser is already running`. The check itself covers every local server in your configuration.
+It was written mainly for `chrome-devtools-mcp`, where instances share one Chrome profile by default, so a second one fails with `browser is already running`. The check itself covers every local server in your configuration.
 
 Two pieces:
 
@@ -80,8 +80,8 @@ chrome-devtools (chrome-devtools-mcp)
     reclaim: kill 401 400
 
 2 live instances of chrome-devtools are running (claude, opencode). A new instance may fail
-to start while they hold the same resources. chrome-devtools-mcp shares one Chrome profile, so
-a second instance usually fails with "browser is already running".
+to start while they hold the same resources. chrome-devtools-mcp shares one Chrome profile by
+default, so a second instance usually fails with "browser is already running".
 ```
 
 - **in use**: a live process owns the chain. The owner is the first ancestor outside the
@@ -123,7 +123,8 @@ cat /tmp/mcp-doctor.log
   from PowerShell's `Win32_Process` provider on Windows.
 - When the process table cannot be read, the CLI exits `3` and the plugin says so once per
   session, rather than reporting a clean machine.
-- The CLI is TypeScript run through the runtime's type stripping, so it needs Bun or Node 22.6+.
+- The CLI is TypeScript run through the runtime's type stripping: it needs Bun, or Node 22.18+ where
+  stripping is on by default. Node 22.6–22.17 work only with `--experimental-strip-types`.
 - The notice is a session message. Clients that render session messages show it. `opencode run` prints only assistant output, so the note does not appear there.
 - Configuration is read at load time. Add a server, then reload the plugin (`opencode service restart` or a config reload) for the check to cover it.
 
